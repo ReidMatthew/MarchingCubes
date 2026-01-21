@@ -1,0 +1,22 @@
+#pragma kernel ConvertTexture3D
+
+Texture3D<float> SourceTexture;
+SamplerState linearClampSampler;
+RWTexture3D<float> TargetTexture;
+
+uint3 textureSize;
+
+[numthreads(8, 8, 8)]
+void ConvertTexture3D(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= textureSize.x || id.y >= textureSize.y || id.z >= textureSize.z)
+    {
+        return;
+    }
+    
+    // Sample the source texture and write directly to target
+    float3 uvw = (id + 0.5) / (float3)textureSize;
+    float value = SourceTexture.SampleLevel(linearClampSampler, uvw, 0);
+    TargetTexture[id] = value;
+}
+
