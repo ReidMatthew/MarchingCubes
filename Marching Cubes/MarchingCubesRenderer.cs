@@ -2,8 +2,14 @@ using UnityEngine;
 
 public class MarchingCubesRenderer : MonoBehaviour
 {
+    [Range(-1f, 1f)]
     public float isoLevel;
     public Color col;
+    
+    [Header("Level of Detail")]
+    [Range(1, 8)]
+    [Tooltip("Resolution factor for level of detail. 1 = use every voxel, 2 = average 2x2x2 voxels, etc.")]
+    public int resolution = 1;
 
     [Header("References")]
     [Tooltip("3D RenderTexture containing the density map (takes priority if both are set)")]
@@ -25,10 +31,14 @@ public class MarchingCubesRenderer : MonoBehaviour
     Texture3D lastConvertedTexture3D;
     ComputeShader texture3DToRenderTextureCS;
     
+    // Field for downsampling compute shader
+    ComputeShader downsampleDensityMapCS;
+    
     // Track last values to prevent redundant recomputations
     float lastIsoLevel = float.MinValue;
     RenderTexture lastDensityMap;
     Texture3D lastDensityTexture3D;
+    int lastResolution = -1;
 
     void Start()
     {
@@ -45,7 +55,21 @@ public class MarchingCubesRenderer : MonoBehaviour
             Debug.LogError("MarchingCubesRenderer: Could not load Texture3DToRenderTexture compute shader from Resources.");
         }
         
+        // Load downsampling compute shader
+        downsampleDensityMapCS = Resources.Load<ComputeShader>("DownsampleDensityMap");
+        if (downsampleDensityMapCS == null)
+        {
+            Debug.LogError("MarchingCubesRenderer: Could not load DownsampleDensityMap compute shader from Resources.");
+        }
+        
         marchingCubes = new MarchingCubes();
+        
+        // Initialize tracking values
+        lastIsoLevel = isoLevel;
+        lastDensityMap = densityMap;
+        lastDensityTexture3D = densityTexture3D;
+        lastResolution = resolution;
+        
         RecomputeMesh();
     }
 
@@ -64,7 +88,8 @@ public class MarchingCubesRenderer : MonoBehaviour
         bool needsRecompute = (marchingCubes != null) && (
             isoLevel != lastIsoLevel ||
             densityMap != lastDensityMap ||
-            densityTexture3D != lastDensityTexture3D
+            densityTexture3D != lastDensityTexture3D ||
+            resolution != lastResolution
         );
         
         if (needsRecompute)
@@ -73,6 +98,7 @@ public class MarchingCubesRenderer : MonoBehaviour
             lastIsoLevel = isoLevel;
             lastDensityMap = densityMap;
             lastDensityTexture3D = densityTexture3D;
+            lastResolution = resolution;
         }
     }
     
@@ -90,11 +116,60 @@ public class MarchingCubesRenderer : MonoBehaviour
         // Direct field checks instead of GetDensityTexture() - more efficient
         if (densityMap != null)
         {
-            triangleBuffer = marchingCubes.Run(densityMap, isoLevel);
+            // Downsample if resolution > 1
+            if (resolution > 1)
+            {
+                RenderTexture downsampled = DownsampleDensityMap(densityMap, resolution);
+                triangleBuffer = marchingCubes.Run(downsampled, isoLevel);
+                // Clean up temporary downsampled texture
+                downsampled.Release();
+                DestroyImmediate(downsampled);
+            }
+            else
+            {
+                triangleBuffer = marchingCubes.Run(densityMap, isoLevel);
+            }
         }
         else if (densityTexture3D != null)
         {
-            triangleBuffer = marchingCubes.Run(densityTexture3D, isoLevel);
+            // If resolution is 1, use Texture3D directly (no conversion needed)
+            if (resolution == 1)
+            {
+                triangleBuffer = marchingCubes.Run(densityTexture3D, isoLevel);
+            }
+            else
+            {
+                // For downsampling, we need to convert Texture3D to RenderTexture first
+                RenderTexture converted = new RenderTexture(densityTexture3D.width, densityTexture3D.height, 0, RenderTextureFormat.RFloat);
+                converted.dimension = UnityEngine.Rendering.TextureDimension.Tex3D;
+                converted.volumeDepth = densityTexture3D.depth;
+                converted.enableRandomWrite = true;
+                converted.Create();
+                
+                // Convert Texture3D to RenderTexture
+                if (texture3DToRenderTextureCS != null)
+                {
+                    int kernelIndex = texture3DToRenderTextureCS.FindKernel("ConvertTexture3D");
+                    texture3DToRenderTextureCS.SetTexture(kernelIndex, "SourceTexture", densityTexture3D);
+                    texture3DToRenderTextureCS.SetTexture(kernelIndex, "TargetTexture", converted);
+                    texture3DToRenderTextureCS.SetInts("textureSize", densityTexture3D.width, densityTexture3D.height, densityTexture3D.depth);
+                    
+                    int threadGroupsX = Mathf.CeilToInt((float)densityTexture3D.width / 8f);
+                    int threadGroupsY = Mathf.CeilToInt((float)densityTexture3D.height / 8f);
+                    int threadGroupsZ = Mathf.CeilToInt((float)densityTexture3D.depth / 8f);
+                    texture3DToRenderTextureCS.Dispatch(kernelIndex, threadGroupsX, threadGroupsY, threadGroupsZ);
+                }
+                
+                // Downsample the converted texture
+                RenderTexture downsampled = DownsampleDensityMap(converted, resolution);
+                triangleBuffer = marchingCubes.Run(downsampled, isoLevel);
+                
+                // Clean up temporary textures
+                converted.Release();
+                DestroyImmediate(converted);
+                downsampled.Release();
+                DestroyImmediate(downsampled);
+            }
         }
         // No redundant buffer release - handled in MarchingCubes.CreateTriangleBuffer() when dimensions change
     }
@@ -215,6 +290,55 @@ public class MarchingCubesRenderer : MonoBehaviour
         lastConvertedTexture3D = densityTexture3D;
         
         Debug.Log($"MarchingCubesRenderer: Automatically converted Texture3D ({densityTexture3D.width}x{densityTexture3D.height}x{densityTexture3D.depth}) to RenderTexture.");
+    }
+    
+    /// <summary>
+    /// Downsamples a RenderTexture by averaging resolution^3 voxels into each output voxel.
+    /// Returns a new RenderTexture with dimensions divided by resolution.
+    /// </summary>
+    RenderTexture DownsampleDensityMap(RenderTexture source, int resolution)
+    {
+        if (source == null || resolution <= 1)
+        {
+            return source;
+        }
+        
+        if (downsampleDensityMapCS == null)
+        {
+            Debug.LogError("MarchingCubesRenderer: DownsampleDensityMap compute shader not loaded.");
+            return source;
+        }
+        
+        // Calculate downsampled dimensions
+        int downsampledWidth = Mathf.Max(1, source.width / resolution);
+        int downsampledHeight = Mathf.Max(1, source.height / resolution);
+        int downsampledDepth = Mathf.Max(1, source.volumeDepth / resolution);
+        
+        // Create downsampled RenderTexture
+        RenderTexture downsampled = new RenderTexture(downsampledWidth, downsampledHeight, 0, RenderTextureFormat.RFloat);
+        downsampled.dimension = UnityEngine.Rendering.TextureDimension.Tex3D;
+        downsampled.volumeDepth = downsampledDepth;
+        downsampled.enableRandomWrite = true;
+        downsampled.name = source.name + " (Downsampled x" + resolution + ")";
+        downsampled.Create();
+        
+        // Set compute shader parameters
+        int kernelIndex = downsampleDensityMapCS.FindKernel("DownsampleDensityMap");
+        downsampleDensityMapCS.SetTexture(kernelIndex, "SourceTexture", source);
+        downsampleDensityMapCS.SetTexture(kernelIndex, "TargetTexture", downsampled);
+        downsampleDensityMapCS.SetInts("sourceSize", source.width, source.height, source.volumeDepth);
+        downsampleDensityMapCS.SetInts("targetSize", downsampledWidth, downsampledHeight, downsampledDepth);
+        downsampleDensityMapCS.SetInt("resolution", resolution);
+        
+        // Dispatch compute shader
+        // Thread group size is 8x8x8, so calculate number of groups needed
+        int threadGroupsX = Mathf.CeilToInt((float)downsampledWidth / 8f);
+        int threadGroupsY = Mathf.CeilToInt((float)downsampledHeight / 8f);
+        int threadGroupsZ = Mathf.CeilToInt((float)downsampledDepth / 8f);
+        
+        downsampleDensityMapCS.Dispatch(kernelIndex, threadGroupsX, threadGroupsY, threadGroupsZ);
+        
+        return downsampled;
     }
 
 }
