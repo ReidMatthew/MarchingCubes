@@ -26,9 +26,15 @@ public class MarchingCubesCore
     bool _readbackPending;
     int _pendingW, _pendingH, _pendingD;
 
+    bool _releaseDeferred;
+    int _pendingReleaseW, _pendingReleaseH, _pendingReleaseD;
+
     const int MaxTriangleMultiplier = 5;
 
     public Mesh Mesh => _mesh;
+    public bool NeedsRecompute { get; private set; }
+
+    public void ClearNeedsRecompute() => NeedsRecompute = false;
 
     public MarchingCubesCore()
     {
@@ -42,8 +48,15 @@ public class MarchingCubesCore
         if (width == _cachedWidth && height == _cachedHeight && depth == _cachedDepth)
             return;
 
-        ReleaseMeshAndCounter();
+        ReleaseMeshAndCounter(true, width, height, depth);
+        if (_releaseDeferred)
+            return;
 
+        AllocateWithDimensions(width, height, depth);
+    }
+
+    void AllocateWithDimensions(int width, int height, int depth)
+    {
         int numVoxelsX = width - 1;
         int numVoxelsY = height - 1;
         int numVoxelsZ = depth - 1;
@@ -148,6 +161,28 @@ public class MarchingCubesCore
         _mesh.SetSubMesh(0, new SubMeshDescriptor(0, actualVertexCount), MeshUpdateFlags.DontRecalculateBounds);
         SetBounds(_pendingW, _pendingH, _pendingD);
         _readbackPending = false;
+
+        if (_releaseDeferred)
+        {
+            _countReadbackBuffer?.Release();
+            _countReadbackBuffer = null;
+            _counterBuffer?.Release();
+            _counterBuffer = null;
+            _vertexBuffer?.Dispose();
+            _vertexBuffer = null;
+            _indexBuffer?.Dispose();
+            _indexBuffer = null;
+            if (_mesh != null)
+            {
+                UnityEngine.Object.Destroy(_mesh);
+                _mesh = null;
+            }
+            int pw = _pendingReleaseW, ph = _pendingReleaseH, pd = _pendingReleaseD;
+            _releaseDeferred = false;
+            _pendingReleaseW = _pendingReleaseH = _pendingReleaseD = 0;
+            AllocateWithDimensions(pw, ph, pd);
+            NeedsRecompute = true;
+        }
         return true;
     }
 
@@ -159,6 +194,7 @@ public class MarchingCubesCore
         int h = densityMap.height;
         int d = densityMap.volumeDepth;
         EnsureCapacity(w, h, d);
+        if (_releaseDeferred) return;
         _counterBuffer.SetCounterValue(0);
         ApplySettings(densityMap, isoLevel);
         RunInternalAsync(w, h, d);
@@ -172,6 +208,7 @@ public class MarchingCubesCore
         int h = densityMap.height;
         int d = densityMap.depth;
         EnsureCapacity(w, h, d);
+        if (_releaseDeferred) return;
         _counterBuffer.SetCounterValue(0);
         ApplySettings(densityMap, isoLevel);
         RunInternalAsync(w, h, d);
@@ -185,6 +222,7 @@ public class MarchingCubesCore
         int h = densityMap.height;
         int d = densityMap.volumeDepth;
         EnsureCapacity(w, h, d);
+        if (_releaseDeferred) return;
         _counterBuffer.SetCounterValue(0);
         ApplySettings(densityMap, isoLevel);
         RunInternalSync(w, h, d);
@@ -198,14 +236,28 @@ public class MarchingCubesCore
         int h = densityMap.height;
         int d = densityMap.depth;
         EnsureCapacity(w, h, d);
+        if (_releaseDeferred) return;
         _counterBuffer.SetCounterValue(0);
         ApplySettings(densityMap, isoLevel);
         RunInternalSync(w, h, d);
     }
 
-    void ReleaseMeshAndCounter()
+    void ReleaseMeshAndCounter(bool deferIfReadbackPending = false, int pendingW = 0, int pendingH = 0, int pendingD = 0)
     {
-        _readbackPending = false;
+        if (deferIfReadbackPending && _readbackPending)
+        {
+            _releaseDeferred = true;
+            _pendingReleaseW = pendingW;
+            _pendingReleaseH = pendingH;
+            _pendingReleaseD = pendingD;
+            return;
+        }
+        if (_readbackPending)
+        {
+            if (!_readbackRequest.done)
+                _readbackRequest.WaitForCompletion();
+            _readbackPending = false;
+        }
         _countReadbackBuffer?.Release();
         _countReadbackBuffer = null;
         _counterBuffer?.Release();
@@ -223,7 +275,7 @@ public class MarchingCubesCore
 
     public void Release()
     {
-        ReleaseMeshAndCounter();
+        ReleaseMeshAndCounter(false);
     }
 }
 }

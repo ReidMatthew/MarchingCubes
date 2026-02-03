@@ -2,6 +2,7 @@ using UnityEngine;
 
 namespace MarchingCubes
 {
+[ExecuteAlways]
 [RequireComponent(typeof(MeshFilter))]
 [RequireComponent(typeof(MeshRenderer))]
 public class MarchingCubesRenderer : MonoBehaviour
@@ -13,6 +14,10 @@ public class MarchingCubesRenderer : MonoBehaviour
     [Range(1, 8)]
     [Tooltip("Resolution factor for level of detail. 1 = use every voxel, 2 = average 2x2x2 voxels, etc.")]
     public int resolution = 1;
+
+    [Header("Editor Preview")]
+    [Tooltip("Show marching cubes mesh in Scene view when game is not running")]
+    public bool renderInEditMode = true;
 
     [Header("References")]
     [Tooltip("3D RenderTexture containing the density map (takes priority if both are set)")]
@@ -39,8 +44,9 @@ public class MarchingCubesRenderer : MonoBehaviour
     RenderTexture _lastDensityMap;
     Texture3D _lastDensityTexture3D;
     int _lastResolution = -1;
+    bool _lastRenderInEditMode = true;
 
-    void Start()
+    void OnEnable()
     {
         _texture3DToRenderTextureCS = Resources.Load<ComputeShader>("Texture3DToRenderTexture");
         if (_texture3DToRenderTextureCS == null)
@@ -56,14 +62,44 @@ public class MarchingCubesRenderer : MonoBehaviour
         _lastDensityMap = densityMap;
         _lastDensityTexture3D = densityTexture3D;
         _lastResolution = resolution;
+        _lastRenderInEditMode = renderInEditMode;
 
-        RecomputeMesh();
+        if (Application.isPlaying || renderInEditMode)
+            RecomputeMesh();
+        else
+            ClearMesh();
+    }
+
+    void OnDisable()
+    {
+        _core?.Release();
+        _core = null;
     }
 
     string GetMeshName()
     {
         string baseName = densityTexture3D != null ? densityTexture3D.name : densityMap != null ? densityMap.name : "MarchingCubes";
         return baseName + " (Mesh)";
+    }
+
+    void AssignMeshToFilter()
+    {
+        if (_core == null) return;
+        Mesh mesh = _core.Mesh;
+        if (mesh != null)
+        {
+            mesh.name = GetMeshName();
+            MeshFilter mf = GetComponent<MeshFilter>();
+            if (mf != null)
+                mf.sharedMesh = mesh;
+        }
+    }
+
+    void ClearMesh()
+    {
+        MeshFilter mf = GetComponent<MeshFilter>();
+        if (mf != null)
+            mf.sharedMesh = null;
     }
 
     void Update()
@@ -79,6 +115,11 @@ public class MarchingCubesRenderer : MonoBehaviour
                     mf.sharedMesh = mesh;
             }
         }
+        if (_core != null && _core.NeedsRecompute)
+        {
+            _core.ClearNeedsRecompute();
+            RecomputeMesh();
+        }
     }
 
     void OnValidate()
@@ -89,18 +130,23 @@ public class MarchingCubesRenderer : MonoBehaviour
             isoLevel != _lastIsoLevel ||
             densityMap != _lastDensityMap ||
             densityTexture3D != _lastDensityTexture3D ||
-            resolution != _lastResolution
+            resolution != _lastResolution ||
+            renderInEditMode != _lastRenderInEditMode
         );
 
         if (needsRecompute)
         {
             if (densityMap != _lastDensityMap || densityTexture3D != _lastDensityTexture3D || resolution != _lastResolution)
                 ReleaseCachedRTs();
-            RecomputeMesh();
+            if (Application.isPlaying || renderInEditMode)
+                RecomputeMesh();
+            else
+                ClearMesh();
             _lastIsoLevel = isoLevel;
             _lastDensityMap = densityMap;
             _lastDensityTexture3D = densityTexture3D;
             _lastResolution = resolution;
+            _lastRenderInEditMode = renderInEditMode;
         }
     }
 
@@ -154,18 +200,36 @@ public class MarchingCubesRenderer : MonoBehaviour
                     _cachedDownsampleSourceRT = densityMap;
                     _cachedDownsampleResRT = resolution;
                 }
-                _core.RunAsync(_cachedDownsampledFromRT, isoLevel);
+                if (Application.isPlaying)
+                    _core.RunAsync(_cachedDownsampledFromRT, isoLevel);
+                else
+                {
+                    _core.Run(_cachedDownsampledFromRT, isoLevel);
+                    AssignMeshToFilter();
+                }
             }
             else
             {
-                _core.RunAsync(densityMap, isoLevel);
+                if (Application.isPlaying)
+                    _core.RunAsync(densityMap, isoLevel);
+                else
+                {
+                    _core.Run(densityMap, isoLevel);
+                    AssignMeshToFilter();
+                }
             }
         }
         else if (densityTexture3D != null)
         {
             if (resolution == 1)
             {
-                _core.RunAsync(densityTexture3D, isoLevel);
+                if (Application.isPlaying)
+                    _core.RunAsync(densityTexture3D, isoLevel);
+                else
+                {
+                    _core.Run(densityTexture3D, isoLevel);
+                    AssignMeshToFilter();
+                }
             }
             else
             {
@@ -208,7 +272,13 @@ public class MarchingCubesRenderer : MonoBehaviour
                     _cachedDownsampleResolution = resolution;
                 }
 
-                _core.RunAsync(_cachedDownsampled, isoLevel);
+                if (Application.isPlaying)
+                    _core.RunAsync(_cachedDownsampled, isoLevel);
+                else
+                {
+                    _core.Run(_cachedDownsampled, isoLevel);
+                    AssignMeshToFilter();
+                }
             }
         }
     }
