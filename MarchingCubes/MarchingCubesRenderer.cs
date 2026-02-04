@@ -10,6 +10,10 @@ public class MarchingCubesRenderer : MonoBehaviour
     [Range(-1f, 1f)]
     public float isoLevel;
 
+    [Header("Scale")]
+    [Tooltip("World size per voxel. A 128×64×64 volume is rendered as 128×voxelSize by 64×voxelSize by 64×voxelSize units.")]
+    public float voxelSize = 1f;
+
     [Header("Level of Detail")]
     [Range(1, 8)]
     [Tooltip("Resolution factor for level of detail. 1 = use every voxel, 2 = average 2x2x2 voxels, etc.")]
@@ -45,6 +49,7 @@ public class MarchingCubesRenderer : MonoBehaviour
     Texture3D _lastDensityTexture3D;
     int _lastResolution = -1;
     bool _lastRenderInEditMode = true;
+    float _lastVoxelSize = float.MinValue;
 
     void OnEnable()
     {
@@ -63,6 +68,7 @@ public class MarchingCubesRenderer : MonoBehaviour
         _lastDensityTexture3D = densityTexture3D;
         _lastResolution = resolution;
         _lastRenderInEditMode = renderInEditMode;
+        _lastVoxelSize = voxelSize;
 
         if (Application.isPlaying || renderInEditMode)
             RecomputeMesh();
@@ -131,7 +137,8 @@ public class MarchingCubesRenderer : MonoBehaviour
             densityMap != _lastDensityMap ||
             densityTexture3D != _lastDensityTexture3D ||
             resolution != _lastResolution ||
-            renderInEditMode != _lastRenderInEditMode
+            renderInEditMode != _lastRenderInEditMode ||
+            voxelSize != _lastVoxelSize
         );
 
         if (needsRecompute)
@@ -147,6 +154,7 @@ public class MarchingCubesRenderer : MonoBehaviour
             _lastDensityTexture3D = densityTexture3D;
             _lastResolution = resolution;
             _lastRenderInEditMode = renderInEditMode;
+            _lastVoxelSize = voxelSize;
         }
     }
 
@@ -200,12 +208,12 @@ public class MarchingCubesRenderer : MonoBehaviour
                     _cachedDownsampleSourceRT = densityMap;
                     _cachedDownsampleResRT = resolution;
                 }
-                _core.Run(_cachedDownsampledFromRT, isoLevel);
+                _core.Run(_cachedDownsampledFromRT, isoLevel, voxelSize * resolution);
                 AssignMeshToFilter();
             }
             else
             {
-                _core.Run(densityMap, isoLevel);
+                _core.Run(densityMap, isoLevel, voxelSize);
                 AssignMeshToFilter();
             }
         }
@@ -213,7 +221,7 @@ public class MarchingCubesRenderer : MonoBehaviour
         {
             if (resolution == 1)
             {
-                _core.Run(densityTexture3D, isoLevel);
+                _core.Run(densityTexture3D, isoLevel, voxelSize);
                 AssignMeshToFilter();
             }
             else
@@ -257,7 +265,7 @@ public class MarchingCubesRenderer : MonoBehaviour
                     _cachedDownsampleResolution = resolution;
                 }
 
-                _core.Run(_cachedDownsampled, isoLevel);
+                _core.Run(_cachedDownsampled, isoLevel, voxelSize * resolution);
                 AssignMeshToFilter();
             }
         }

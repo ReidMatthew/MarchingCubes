@@ -19,6 +19,7 @@ public class MarchingCubesCore
     int _cachedWidth = -1;
     int _cachedHeight = -1;
     int _cachedDepth = -1;
+    float _voxelSize = 1f;
 
     readonly uint[] _countReadback = new uint[1];
 
@@ -85,11 +86,13 @@ public class MarchingCubesCore
         _cachedDepth = depth;
     }
 
-    void ApplySettings(RenderTexture densityMap, float isoLevel)
+    void ApplySettings(RenderTexture densityMap, float isoLevel, float voxelSize)
     {
+        _voxelSize = voxelSize;
         _compute.SetTexture(0, "DensityMap", densityMap);
         _compute.SetInts("densityMapSize", densityMap.width, densityMap.height, densityMap.volumeDepth);
         _compute.SetFloat("isoLevel", isoLevel);
+        _compute.SetFloat("voxelSize", voxelSize);
         int numVoxels = (densityMap.width - 1) * (densityMap.height - 1) * (densityMap.volumeDepth - 1);
         _compute.SetInt("MaxTriangle", numVoxels * MaxTriangleMultiplier);
         _compute.SetBuffer(0, "VertexBuffer", _vertexBuffer);
@@ -97,11 +100,13 @@ public class MarchingCubesCore
         _compute.SetBuffer(0, "Counter", _counterBuffer);
     }
 
-    void ApplySettings(Texture3D densityMap, float isoLevel)
+    void ApplySettings(Texture3D densityMap, float isoLevel, float voxelSize)
     {
+        _voxelSize = voxelSize;
         _compute.SetTexture(0, "DensityMap", densityMap);
         _compute.SetInts("densityMapSize", densityMap.width, densityMap.height, densityMap.depth);
         _compute.SetFloat("isoLevel", isoLevel);
+        _compute.SetFloat("voxelSize", voxelSize);
         int numVoxels = (densityMap.width - 1) * (densityMap.height - 1) * (densityMap.depth - 1);
         _compute.SetInt("MaxTriangle", numVoxels * MaxTriangleMultiplier);
         _compute.SetBuffer(0, "VertexBuffer", _vertexBuffer);
@@ -111,10 +116,8 @@ public class MarchingCubesCore
 
     void SetBounds(int width, int height, int depth)
     {
-        Vector3 size = new Vector3(width, height, depth);
-        float maxDim = Mathf.Max(size.x, Mathf.Max(size.y, size.z));
-        Vector3 scale = size / maxDim * 2f;
-        _mesh.bounds = new Bounds(Vector3.zero, scale);
+        Vector3 size = new Vector3(width * _voxelSize, height * _voxelSize, depth * _voxelSize);
+        _mesh.bounds = new Bounds(Vector3.zero, size);
     }
 
     void CompleteReadbackAndApply(int w, int h, int d)
@@ -189,7 +192,7 @@ public class MarchingCubesCore
         return true;
     }
 
-    public void RunAsync(RenderTexture densityMap, float isoLevel)
+    public void RunAsync(RenderTexture densityMap, float isoLevel, float voxelSize = 1f)
     {
         if (_compute == null || densityMap == null) return;
 
@@ -199,11 +202,11 @@ public class MarchingCubesCore
         EnsureCapacity(w, h, d);
         if (_releaseDeferred) return;
         _counterBuffer.SetCounterValue(0);
-        ApplySettings(densityMap, isoLevel);
+        ApplySettings(densityMap, isoLevel, voxelSize);
         RunInternalAsync(w, h, d);
     }
 
-    public void RunAsync(Texture3D densityMap, float isoLevel)
+    public void RunAsync(Texture3D densityMap, float isoLevel, float voxelSize = 1f)
     {
         if (_compute == null || densityMap == null) return;
 
@@ -213,11 +216,11 @@ public class MarchingCubesCore
         EnsureCapacity(w, h, d);
         if (_releaseDeferred) return;
         _counterBuffer.SetCounterValue(0);
-        ApplySettings(densityMap, isoLevel);
+        ApplySettings(densityMap, isoLevel, voxelSize);
         RunInternalAsync(w, h, d);
     }
 
-    public void Run(RenderTexture densityMap, float isoLevel)
+    public void Run(RenderTexture densityMap, float isoLevel, float voxelSize = 1f)
     {
         if (_compute == null || densityMap == null) return;
 
@@ -227,11 +230,11 @@ public class MarchingCubesCore
         EnsureCapacity(w, h, d);
         if (_releaseDeferred) return;
         _counterBuffer.SetCounterValue(0);
-        ApplySettings(densityMap, isoLevel);
+        ApplySettings(densityMap, isoLevel, voxelSize);
         RunInternalSync(w, h, d);
     }
 
-    public void Run(Texture3D densityMap, float isoLevel)
+    public void Run(Texture3D densityMap, float isoLevel, float voxelSize = 1f)
     {
         if (_compute == null || densityMap == null) return;
 
@@ -241,7 +244,7 @@ public class MarchingCubesCore
         EnsureCapacity(w, h, d);
         if (_releaseDeferred) return;
         _counterBuffer.SetCounterValue(0);
-        ApplySettings(densityMap, isoLevel);
+        ApplySettings(densityMap, isoLevel, voxelSize);
         RunInternalSync(w, h, d);
     }
 

@@ -1,12 +1,16 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace MarchingCubes
 {
     /// <summary>
     /// When placed on a GameObject with a MeshFilter and mesh, sets up MeshToSDF and SDFTexture,
     /// bakes the mesh to an SDF, runs MarchingCubesRenderer to produce a new mesh. The MeshFilter
-    /// will hold the marching cubes result. Converter, SDFTexture, and MeshToSDF remain on the object.
+    /// will hold the marching cubes result. When conversion finishes, the SDF texture, SDFTexture,
+    /// MeshToSDF, and this converter are removed; MarchingCubesRenderer and the result mesh remain.
     /// </summary>
     [ExecuteAlways]
     [RequireComponent(typeof(MeshFilter))]
@@ -17,6 +21,8 @@ namespace MarchingCubes
         public int resolution = 64;
 
         const float MinSize = 0.001f;
+        // this is wahtever space is needed to just get the round shapes to be smooth at the poles
+        const float BoundsExtraPixels = .1f;
 
         void OnEnable()
         {
@@ -32,6 +38,9 @@ namespace MarchingCubes
             size.x = Mathf.Max(size.x, MinSize);
             size.y = Mathf.Max(size.y, MinSize);
             size.z = Mathf.Max(size.z, MinSize);
+            size.x += BoundsExtraPixels;
+            size.y += BoundsExtraPixels;
+            size.z += BoundsExtraPixels;
 
             // Add components if missing
             SDFTexture sdfTexture = GetComponent<SDFTexture>();
@@ -92,7 +101,7 @@ namespace MarchingCubes
             floatRT.dimension = TextureDimension.Tex3D;
             floatRT.volumeDepth = res.z;
             floatRT.enableRandomWrite = true;
-            floatRT.name = mesh.name + " (Density Float)";
+            floatRT.name = mesh.name;
             floatRT.Create();
 
             int kernel = copyCS.FindKernel("CopySDFToFloat");
@@ -107,9 +116,43 @@ namespace MarchingCubes
             // Assign to MarchingCubesRenderer and run
             mcr.densityMap = floatRT;
             mcr.densityTexture3D = null;
+            // Voxel size so the marching cubes mesh matches the original mesh bounds:
+            // extent per axis = res.x * voxelSize, res.y * voxelSize, res.z * voxelSize
+            // We want that to equal size (original bounds), so voxelSize = size.x / res.x
+            // (res is proportional to size, so size.x/res.x = size.y/res.y = size.z/res.z)
+            mcr.voxelSize = (size.x + (BoundsExtraPixels / 2)) / res.x;
             mcr.RecomputeMesh();
 
-            // Leave sdfRT assigned to SDFTexture.sdf so it stays visible in the inspector
+            // Clean up: remove SDF texture, SDFTexture, MeshToSDF, and this converter (deferred so we're not destroying during OnEnable)
+            CleanupAfterConversion(sdfRT, sdfTexture, meshToSDF);
+        }
+
+        void CleanupAfterConversion(RenderTexture sdfRT, SDFTexture sdfTexture, MeshToSDF meshToSDF)
+        {
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                var rt = sdfRT;
+                var sdf = sdfTexture;
+                var meshToSdf = meshToSDF;
+                var self = this;
+                EditorApplication.delayCall += () =>
+                {
+                    if (sdf != null) sdf.sdf = null;
+                    if (rt != null) { rt.Release(); DestroyImmediate(rt); }
+                    if (sdf != null) DestroyImmediate(sdf);
+                    if (meshToSdf != null) DestroyImmediate(meshToSdf);
+                    if (self != null) DestroyImmediate(self);
+                };
+                return;
+            }
+#endif
+            sdfTexture.sdf = null;
+            sdfRT.Release();
+            Destroy(sdfRT);
+            Destroy(sdfTexture);
+            Destroy(meshToSDF);
+            Destroy(this);
         }
 
         bool AssignMeshToSDFCompute(MeshToSDF meshToSDF)
