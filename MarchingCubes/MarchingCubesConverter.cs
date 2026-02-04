@@ -18,13 +18,22 @@ namespace MarchingCubes
     {
         [Tooltip("SDF voxel resolution along the longest axis. Y and Z are derived from size proportions.")]
         [Range(16, 256)]
-        public int resolution = 64;
+        public int resolution = 128;
+
+        [Tooltip("Extra space added to mesh bounds before voxelization.")]
+        public float padding = .1f;
 
         const float MinSize = 0.001f;
-        // this is wahtever space is needed to just get the round shapes to be smooth at the poles
-        const float BoundsExtraPixels = .1f;
 
         void OnEnable()
+        {
+        }
+
+        /// <summary>
+        /// Runs the conversion pipeline: bakes mesh to SDF, runs marching cubes, adds MarchingCubesRenderer,
+        /// then removes SDF/MeshToSDF/this converter. Call from the Inspector Generate button or from code.
+        /// </summary>
+        public void Generate()
         {
             MeshFilter mf = GetComponent<MeshFilter>();
             if (mf == null || mf.sharedMesh == null)
@@ -38,9 +47,9 @@ namespace MarchingCubes
             size.x = Mathf.Max(size.x, MinSize);
             size.y = Mathf.Max(size.y, MinSize);
             size.z = Mathf.Max(size.z, MinSize);
-            size.x += BoundsExtraPixels;
-            size.y += BoundsExtraPixels;
-            size.z += BoundsExtraPixels;
+            size.x += padding;
+            size.y += padding;
+            size.z += padding;
 
             // Add components if missing
             SDFTexture sdfTexture = GetComponent<SDFTexture>();
@@ -63,7 +72,10 @@ namespace MarchingCubes
 
             // Set SDF size to mesh bounds
             sdfTexture.size = size;
-            sdfTexture.resolution = resolution;
+            // SDFTexture uses resolution as X-axis and scales Y,Z by size; we want resolution = largest dimension
+            float sizeMax = Mathf.Max(size.x, size.y, size.z);
+            int resolutionForSDF = Mathf.Max(1, Mathf.RoundToInt(resolution * size.x / sizeMax));
+            sdfTexture.resolution = resolutionForSDF;
 
             // Create 3D RenderTexture (RHalf) for SDF and assign to SDFTexture
             Vector3Int res = sdfTexture.voxelResolution;
@@ -120,7 +132,7 @@ namespace MarchingCubes
             // extent per axis = res.x * voxelSize, res.y * voxelSize, res.z * voxelSize
             // We want that to equal size (original bounds), so voxelSize = size.x / res.x
             // (res is proportional to size, so size.x/res.x = size.y/res.y = size.z/res.z)
-            mcr.voxelSize = (size.x + (BoundsExtraPixels / 2)) / res.x;
+            mcr.voxelSize = (size.x + (padding / 2)) / res.x;
             mcr.RecomputeMesh();
 
             // Clean up: remove SDF texture, SDFTexture, MeshToSDF, and this converter (deferred so we're not destroying during OnEnable)
