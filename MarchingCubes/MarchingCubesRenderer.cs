@@ -200,36 +200,21 @@ public class MarchingCubesRenderer : MonoBehaviour
                     _cachedDownsampleSourceRT = densityMap;
                     _cachedDownsampleResRT = resolution;
                 }
-                if (Application.isPlaying)
-                    _core.RunAsync(_cachedDownsampledFromRT, isoLevel);
-                else
-                {
-                    _core.Run(_cachedDownsampledFromRT, isoLevel);
-                    AssignMeshToFilter();
-                }
+                _core.Run(_cachedDownsampledFromRT, isoLevel);
+                AssignMeshToFilter();
             }
             else
             {
-                if (Application.isPlaying)
-                    _core.RunAsync(densityMap, isoLevel);
-                else
-                {
-                    _core.Run(densityMap, isoLevel);
-                    AssignMeshToFilter();
-                }
+                _core.Run(densityMap, isoLevel);
+                AssignMeshToFilter();
             }
         }
         else if (densityTexture3D != null)
         {
             if (resolution == 1)
             {
-                if (Application.isPlaying)
-                    _core.RunAsync(densityTexture3D, isoLevel);
-                else
-                {
-                    _core.Run(densityTexture3D, isoLevel);
-                    AssignMeshToFilter();
-                }
+                _core.Run(densityTexture3D, isoLevel);
+                AssignMeshToFilter();
             }
             else
             {
@@ -272,13 +257,8 @@ public class MarchingCubesRenderer : MonoBehaviour
                     _cachedDownsampleResolution = resolution;
                 }
 
-                if (Application.isPlaying)
-                    _core.RunAsync(_cachedDownsampled, isoLevel);
-                else
-                {
-                    _core.Run(_cachedDownsampled, isoLevel);
-                    AssignMeshToFilter();
-                }
+                _core.Run(_cachedDownsampled, isoLevel);
+                AssignMeshToFilter();
             }
         }
     }

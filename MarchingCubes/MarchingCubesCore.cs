@@ -174,7 +174,10 @@ public class MarchingCubesCore
             _indexBuffer = null;
             if (_mesh != null)
             {
-                UnityEngine.Object.Destroy(_mesh);
+                if (Application.isPlaying)
+                    UnityEngine.Object.Destroy(_mesh);
+                else
+                    UnityEngine.Object.DestroyImmediate(_mesh);
                 _mesh = null;
             }
             int pw = _pendingReleaseW, ph = _pendingReleaseH, pd = _pendingReleaseD;
@@ -268,7 +271,10 @@ public class MarchingCubesCore
         _indexBuffer = null;
         if (_mesh != null)
         {
-            UnityEngine.Object.Destroy(_mesh);
+            if (Application.isPlaying)
+                UnityEngine.Object.Destroy(_mesh);
+            else
+                UnityEngine.Object.DestroyImmediate(_mesh);
             _mesh = null;
         }
     }
