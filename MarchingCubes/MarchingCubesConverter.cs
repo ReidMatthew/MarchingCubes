@@ -21,10 +21,7 @@ namespace MarchingCubes
         public int resolution = 128;
 
         [Tooltip("Extra space added to mesh bounds before voxelization.")]
-        public float padding = .1f;
-
-        [Tooltip("When enabled, boundary voxels are treated as solid, closing the mesh. When disabled, the mesh stays open at the edges.")]
-        public bool fillBoundary = true;
+        public float padding = 0f;
 
 #if UNITY_EDITOR
         [Tooltip("Project path for the saved Texture3D (e.g. Assets/SDFTextures/MyVolume.asset). If set, the Texture3D is saved to this path; if empty, it is not saved.")]
@@ -143,7 +140,6 @@ namespace MarchingCubes
             mcr.densityTexture3D = tex3D;
             mcr.densityMap = null;
             mcr.voxelSize = (size.x + (padding / 2)) / res.x;
-            mcr.fillBoundary = fillBoundary;
             mcr.RecomputeMesh();
 
 #if UNITY_EDITOR
