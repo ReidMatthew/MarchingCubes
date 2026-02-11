@@ -23,6 +23,10 @@ public class MarchingCubesRenderer : MonoBehaviour
     [Tooltip("Show marching cubes mesh in Scene view when game is not running")]
     public bool renderInEditMode = true;
 
+    [Header("Boundary")]
+    [Tooltip("When enabled, boundary voxels (no neighbors) are treated as solid, closing the mesh. When disabled, the mesh stays open at the edges.")]
+    public bool fillBoundary = true;
+
     [Header("References")]
     [Tooltip("3D RenderTexture containing the density map (takes priority if both are set)")]
     public RenderTexture densityMap;
@@ -47,6 +51,7 @@ public class MarchingCubesRenderer : MonoBehaviour
     int _lastResolution = -1;
     bool _lastRenderInEditMode = true;
     float _lastVoxelSize = float.MinValue;
+    bool _lastFillBoundary = true;
 
     void OnEnable()
     {
@@ -66,6 +71,7 @@ public class MarchingCubesRenderer : MonoBehaviour
         _lastResolution = resolution;
         _lastRenderInEditMode = renderInEditMode;
         _lastVoxelSize = voxelSize;
+        _lastFillBoundary = fillBoundary;
 
         if (Application.isPlaying || renderInEditMode)
             RecomputeMesh();
@@ -135,7 +141,8 @@ public class MarchingCubesRenderer : MonoBehaviour
             densityTexture3D != _lastDensityTexture3D ||
             resolution != _lastResolution ||
             renderInEditMode != _lastRenderInEditMode ||
-            voxelSize != _lastVoxelSize
+            voxelSize != _lastVoxelSize ||
+            fillBoundary != _lastFillBoundary
         );
 
         if (needsRecompute)
@@ -152,6 +159,7 @@ public class MarchingCubesRenderer : MonoBehaviour
             _lastResolution = resolution;
             _lastRenderInEditMode = renderInEditMode;
             _lastVoxelSize = voxelSize;
+            _lastFillBoundary = fillBoundary;
         }
     }
 
@@ -198,12 +206,12 @@ public class MarchingCubesRenderer : MonoBehaviour
                 _cachedDownsampleSourceRT = densityMap;
                 _cachedDownsampleResRT = resolution;
             }
-            _core.Run(_cachedDownsampledFromRT, isoLevel, voxelSize * resolution);
+            _core.Run(_cachedDownsampledFromRT, isoLevel, voxelSize * resolution, fillBoundary);
             AssignMeshToFilter();
         }
         else
         {
-            _core.Run(densityMap, isoLevel, voxelSize);
+            _core.Run(densityMap, isoLevel, voxelSize, fillBoundary);
             AssignMeshToFilter();
         }
     }
