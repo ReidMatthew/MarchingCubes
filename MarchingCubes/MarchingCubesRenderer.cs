@@ -35,10 +35,7 @@ public class MarchingCubesRenderer : MonoBehaviour
     ComputeShader _downsampleDensityMapCS;
     Texture3D _lastConvertedTexture3D;
 
-    RenderTexture _cachedConverted;
     RenderTexture _cachedDownsampled;
-    Texture3D _cachedConvertedSource;
-    int _cachedDownsampleResolution = -1;
 
     RenderTexture _cachedDownsampledFromRT;
     RenderTexture _cachedDownsampleSourceRT;
@@ -174,14 +171,6 @@ public class MarchingCubesRenderer : MonoBehaviour
             DestroyImmediate(_cachedDownsampled);
             _cachedDownsampled = null;
         }
-        if (_cachedConverted != null)
-        {
-            _cachedConverted.Release();
-            DestroyImmediate(_cachedConverted);
-            _cachedConverted = null;
-        }
-        _cachedConvertedSource = null;
-        _cachedDownsampleResolution = -1;
     }
 
     /// <summary>
@@ -191,83 +180,31 @@ public class MarchingCubesRenderer : MonoBehaviour
     {
         if (_core == null) return;
 
-        if (densityMap != null)
+        ConvertTexture3DToRenderTexture();
+        if (densityMap == null) return;
+
+        if (resolution > 1)
         {
-            if (resolution > 1)
+            bool cacheValid = _cachedDownsampledFromRT != null && _cachedDownsampleSourceRT == densityMap && _cachedDownsampleResRT == resolution;
+            if (!cacheValid)
             {
-                bool cacheValid = _cachedDownsampledFromRT != null && _cachedDownsampleSourceRT == densityMap && _cachedDownsampleResRT == resolution;
-                if (!cacheValid)
+                if (_cachedDownsampledFromRT != null)
                 {
-                    if (_cachedDownsampledFromRT != null)
-                    {
-                        _cachedDownsampledFromRT.Release();
-                        DestroyImmediate(_cachedDownsampledFromRT);
-                        _cachedDownsampledFromRT = null;
-                    }
-                    _cachedDownsampledFromRT = DownsampleDensityMap(densityMap, resolution);
-                    _cachedDownsampleSourceRT = densityMap;
-                    _cachedDownsampleResRT = resolution;
+                    _cachedDownsampledFromRT.Release();
+                    DestroyImmediate(_cachedDownsampledFromRT);
+                    _cachedDownsampledFromRT = null;
                 }
-                _core.Run(_cachedDownsampledFromRT, isoLevel, voxelSize * resolution);
-                AssignMeshToFilter();
+                _cachedDownsampledFromRT = DownsampleDensityMap(densityMap, resolution);
+                _cachedDownsampleSourceRT = densityMap;
+                _cachedDownsampleResRT = resolution;
             }
-            else
-            {
-                _core.Run(densityMap, isoLevel, voxelSize);
-                AssignMeshToFilter();
-            }
+            _core.Run(_cachedDownsampledFromRT, isoLevel, voxelSize * resolution);
+            AssignMeshToFilter();
         }
-        else if (densityTexture3D != null)
+        else
         {
-            if (resolution == 1)
-            {
-                _core.Run(densityTexture3D, isoLevel, voxelSize);
-                AssignMeshToFilter();
-            }
-            else
-            {
-                bool needConverted = _cachedConverted == null || _cachedConvertedSource != densityTexture3D ||
-                    _cachedConverted.width != densityTexture3D.width || _cachedConverted.height != densityTexture3D.height || _cachedConverted.volumeDepth != densityTexture3D.depth;
-                if (needConverted)
-                {
-                    ReleaseCachedRTs();
-                    _cachedConverted = new RenderTexture(densityTexture3D.width, densityTexture3D.height, 0, RenderTextureFormat.RFloat);
-                    _cachedConverted.dimension = UnityEngine.Rendering.TextureDimension.Tex3D;
-                    _cachedConverted.volumeDepth = densityTexture3D.depth;
-                    _cachedConverted.enableRandomWrite = true;
-                    _cachedConverted.Create();
-
-                    if (_texture3DToRenderTextureCS != null)
-                    {
-                        int kernelIndex = _texture3DToRenderTextureCS.FindKernel("ConvertTexture3D");
-                        _texture3DToRenderTextureCS.SetTexture(kernelIndex, "SourceTexture", densityTexture3D);
-                        _texture3DToRenderTextureCS.SetTexture(kernelIndex, "TargetTexture", _cachedConverted);
-                        _texture3DToRenderTextureCS.SetInts("textureSize", densityTexture3D.width, densityTexture3D.height, densityTexture3D.depth);
-
-                        int tx = Mathf.CeilToInt((float)densityTexture3D.width / 8f);
-                        int ty = Mathf.CeilToInt((float)densityTexture3D.height / 8f);
-                        int tz = Mathf.CeilToInt((float)densityTexture3D.depth / 8f);
-                        _texture3DToRenderTextureCS.Dispatch(kernelIndex, tx, ty, tz);
-                    }
-                    _cachedConvertedSource = densityTexture3D;
-                }
-
-                bool needDownsampled = _cachedDownsampled == null || _cachedDownsampleResolution != resolution || _cachedConvertedSource != densityTexture3D;
-                if (needDownsampled)
-                {
-                    if (_cachedDownsampled != null)
-                    {
-                        _cachedDownsampled.Release();
-                        DestroyImmediate(_cachedDownsampled);
-                        _cachedDownsampled = null;
-                    }
-                    _cachedDownsampled = DownsampleDensityMap(_cachedConverted, resolution);
-                    _cachedDownsampleResolution = resolution;
-                }
-
-                _core.Run(_cachedDownsampled, isoLevel, voxelSize * resolution);
-                AssignMeshToFilter();
-            }
+            _core.Run(densityMap, isoLevel, voxelSize);
+            AssignMeshToFilter();
         }
     }
 

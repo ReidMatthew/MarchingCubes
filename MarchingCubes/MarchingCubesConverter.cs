@@ -23,6 +23,11 @@ namespace MarchingCubes
         [Tooltip("Extra space added to mesh bounds before voxelization.")]
         public float padding = .1f;
 
+#if UNITY_EDITOR
+        [Tooltip("Project path for the saved Texture3D (e.g. Assets/SDFTextures/MyVolume.asset). If set, the Texture3D is saved to this path; if empty, it is not saved.")]
+        public string texture3DSavePath = "";
+#endif
+
         const float MinSize = 0.001f;
 
         void OnEnable()
@@ -125,33 +130,92 @@ namespace MarchingCubes
             int tz = (res.z + 7) / 8;
             copyCS.Dispatch(kernel, tx, ty, tz);
 
-            // Assign to MarchingCubesRenderer and run
-            mcr.densityMap = floatRT;
-            mcr.densityTexture3D = null;
-            // Voxel size so the marching cubes mesh matches the original mesh bounds:
-            // extent per axis = res.x * voxelSize, res.y * voxelSize, res.z * voxelSize
-            // We want that to equal size (original bounds), so voxelSize = size.x / res.x
-            // (res is proportional to size, so size.x/res.x = size.y/res.y = size.z/res.z)
+            // Copy float RT to Texture3D and assign to renderer
+            Texture3D tex3D = CopyRenderTextureToTexture3D(floatRT, mesh.name + " (Density)");
+            if (tex3D == null)
+            {
+                CleanupAfterConversion(sdfRT, floatRT, sdfTexture, meshToSDF);
+                return;
+            }
+            mcr.densityTexture3D = tex3D;
+            mcr.densityMap = null;
             mcr.voxelSize = (size.x + (padding / 2)) / res.x;
             mcr.RecomputeMesh();
 
-            // Clean up: remove SDF texture, SDFTexture, MeshToSDF, and this converter (deferred so we're not destroying during OnEnable)
-            CleanupAfterConversion(sdfRT, sdfTexture, meshToSDF);
+#if UNITY_EDITOR
+            if (!string.IsNullOrEmpty(texture3DSavePath))
+            {
+                AssetDatabase.CreateAsset(tex3D, texture3DSavePath);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+            }
+#endif
+
+            // Clean up: remove SDF texture, float RT, SDFTexture, MeshToSDF, and this converter (deferred so we're not destroying during OnEnable)
+            CleanupAfterConversion(sdfRT, floatRT, sdfTexture, meshToSDF);
         }
 
-        void CleanupAfterConversion(RenderTexture sdfRT, SDFTexture sdfTexture, MeshToSDF meshToSDF)
+        /// <summary>
+        /// Copies a 3D RenderTexture into a new Texture3D (slice-by-slice readback). Returns null if rt is not Tex3D.
+        /// </summary>
+        static Texture3D CopyRenderTextureToTexture3D(RenderTexture rt, string nameForTexture)
+        {
+            if (rt == null)
+                return null;
+            if (rt.dimension != TextureDimension.Tex3D)
+            {
+                Debug.LogError($"MarchingCubesConverter: RenderTexture must be 3D. Current: {rt.dimension}");
+                return null;
+            }
+
+            int w = rt.width, h = rt.height, d = rt.volumeDepth;
+            var format = TextureFormat.RFloat;
+            var tex3D = new Texture3D(w, h, d, format, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                name = nameForTexture
+            };
+
+            RenderTexture tmp2D = RenderTexture.GetTemporary(w, h, 0, rt.graphicsFormat);
+            RenderTexture prev = RenderTexture.active;
+            var pixels = new Color[w * h * d];
+
+            for (int z = 0; z < d; z++)
+            {
+                Graphics.CopyTexture(rt, z, 0, tmp2D, 0, 0);
+                RenderTexture.active = tmp2D;
+                var tex2D = new Texture2D(w, h, TextureFormat.RGBAFloat, false, true);
+                tex2D.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+                tex2D.Apply(false, false);
+                Color[] slice = tex2D.GetPixels();
+                System.Array.Copy(slice, 0, pixels, z * (w * h), w * h);
+                DestroyImmediate(tex2D);
+            }
+
+            RenderTexture.active = prev;
+            RenderTexture.ReleaseTemporary(tmp2D);
+
+            tex3D.SetPixels(pixels);
+            tex3D.Apply(false, false);
+            return tex3D;
+        }
+
+        void CleanupAfterConversion(RenderTexture sdfRT, RenderTexture floatRT, SDFTexture sdfTexture, MeshToSDF meshToSDF)
         {
 #if UNITY_EDITOR
             if (!Application.isPlaying)
             {
-                var rt = sdfRT;
+                var rtSdf = sdfRT;
+                var rtFloat = floatRT;
                 var sdf = sdfTexture;
                 var meshToSdf = meshToSDF;
                 var self = this;
                 EditorApplication.delayCall += () =>
                 {
                     if (sdf != null) sdf.sdf = null;
-                    if (rt != null) { rt.Release(); DestroyImmediate(rt); }
+                    if (rtSdf != null) { rtSdf.Release(); DestroyImmediate(rtSdf); }
+                    if (rtFloat != null) { rtFloat.Release(); DestroyImmediate(rtFloat); }
                     if (sdf != null) DestroyImmediate(sdf);
                     if (meshToSdf != null) DestroyImmediate(meshToSdf);
                     if (self != null) DestroyImmediate(self);
@@ -160,8 +224,8 @@ namespace MarchingCubes
             }
 #endif
             sdfTexture.sdf = null;
-            sdfRT.Release();
-            Destroy(sdfRT);
+            if (sdfRT != null) { sdfRT.Release(); Destroy(sdfRT); }
+            if (floatRT != null) { floatRT.Release(); Destroy(floatRT); }
             Destroy(sdfTexture);
             Destroy(meshToSDF);
             Destroy(this);
