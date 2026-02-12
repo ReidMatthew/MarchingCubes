@@ -174,6 +174,15 @@ public class MarchingCubesRenderer : MonoBehaviour
     }
 
     /// <summary>
+    /// Invalidates the cached downsampled density map so the next RecomputeMesh() will rebuild from the current densityMap contents.
+    /// Call this after editing the densityMap in place (e.g. from MarchingCubesEditor).
+    /// </summary>
+    public void InvalidateDensityCache()
+    {
+        ReleaseCachedRTs();
+    }
+
+    /// <summary>
     /// Recomputes the mesh from the current density texture and iso level, and assigns it to the MeshFilter.
     /// </summary>
     public void RecomputeMesh()
