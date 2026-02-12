@@ -8,48 +8,21 @@ namespace Seb.Fluid.Demo
 		public float moveSpeed = 3;
 		public float rotationSpeed = 220;
 		public float zoomSpeed = 0.1f;
-		public Vector3 pivot;
 		Vector2 mousePosOld;
 		bool hasFocusOld;
 		public float focusDst = 1f;
-		Vector3 lastCtrlPivot;
-
-		float lastLeftClickTime = float.MinValue;
-		private Vector2 rightClickPos;
-
-		private Vector3 startPos;
-		Quaternion startRot;
-
-		void Start()
-		{
-			startPos = transform.position;
-			startRot = transform.rotation;
-		}
+		Vector3 orbitPivot;
 
 		void Update()
 		{
 			Mouse mouse = Mouse.current;
-			Keyboard keyboard = Keyboard.current;
-
-			if (mouse == null || keyboard == null)
+			if (mouse == null)
 				return;
 
 			if (Application.isFocused != hasFocusOld)
 			{
 				hasFocusOld = Application.isFocused;
 				mousePosOld = mouse.position.ReadValue();
-			}
-
-			// Reset view on double click
-			if (mouse.leftButton.wasPressedThisFrame)
-			{
-				if (Time.time - lastLeftClickTime < 0.2f)
-				{
-					transform.position = startPos;
-					transform.rotation = startRot;
-				}
-
-				lastLeftClickTime = Time.time;
 			}
 
 			float dstWeight = transform.position.magnitude;
@@ -66,46 +39,28 @@ namespace Seb.Fluid.Demo
 				move += Vector3.right * mouseMoveX * -moveSpeed * dstWeight;
 			}
 
-			if (mouse.leftButton.wasPressedThisFrame)
-			{
-				lastCtrlPivot = transform.position + transform.forward * focusDst;
-			}
-
-			if (mouse.leftButton.isPressed)
-			{
-				Vector3 activePivot = keyboard.leftAltKey.isPressed ? transform.position : pivot;
-				if (keyboard.leftCtrlKey.isPressed)
-				{
-					activePivot = lastCtrlPivot;
-				}
-
-				transform.RotateAround(activePivot, transform.right, mouseMoveY * -rotationSpeed);
-				transform.RotateAround(activePivot, Vector3.up, mouseMoveX * rotationSpeed);
-			}
-
-			transform.Translate(move);
-
-			//Scroll to zoom
-			float mouseScroll = mouse.scroll.ReadValue().y;
+			// Right drag = rotate (orbit)
 			if (mouse.rightButton.wasPressedThisFrame)
 			{
-				rightClickPos = mouse.position.ReadValue();
+				orbitPivot = transform.position + transform.forward * focusDst;
 			}
 
 			if (mouse.rightButton.isPressed)
 			{
-				Vector2 delta = mouse.position.ReadValue() - rightClickPos;
-				rightClickPos = mouse.position.ReadValue();
-				mouseScroll = delta.magnitude * Mathf.Sign(Mathf.Abs(delta.x) > Mathf.Abs(delta.y) ? delta.x : -delta.y) / Screen.width * zoomSpeed * 100;
+				transform.RotateAround(orbitPivot, transform.right, mouseMoveY * -rotationSpeed);
+				transform.RotateAround(orbitPivot, Vector3.up, mouseMoveX * rotationSpeed);
 			}
 
+			transform.Translate(move);
+
+			// Scroll = zoom only
+			float mouseScroll = mouse.scroll.ReadValue().y;
 			transform.Translate(Vector3.forward * mouseScroll * zoomSpeed * dstWeight);
 		}
 
 		void OnDrawGizmosSelected()
 		{
 			Gizmos.color = Color.red;
-			// Gizmos.DrawWireSphere(pivot, 0.15f);
 		}
 	}
 }
